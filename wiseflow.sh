@@ -6,6 +6,7 @@ BASE_PATH="wiseflow"
 COOKIES_FILE="cookies/wiseflow.txt"
 ASSIGNMENT_FOLDER="assignment"
 SUBMISSION_FOLDER="submission"
+EXPLANATION_FILE="grade_justification.html"
 IS="--"
 IFS=$'\n'
 #Curl
@@ -13,6 +14,7 @@ MAIN_URL="https://europe.wiseflow.net/participant/"
 FLOWS_URL="https://europe.wiseflow.net/controller/flow/getFlowsInfo.php"
 FLOW_URL="https://europe.wiseflow.net/participant/display.php?id="
 FLOW_API_URL="https://europe.wiseflow.net/r/api/participant/flow/"
+FLOW_EXPLANATION_URL="https://europe.wiseflow.net/r/api/participant/explanation/request/flow/"
 #Text
 FILE_EXISTS_TEXT="File exists, skipping..."
 DONE_TEXT="Done!"
@@ -46,6 +48,12 @@ get_flow_assignment () {
   echo "$output"
 }
 
+get_flow_explanation () {
+  local json=$(curl -s -H "X-CSRFToken: $CSRF_ID" "$FLOW_EXPLANATION_URL$1" --cookie "$COOKIES_FILE")
+  local output=$(jq -r '.comments[].annotateComment.text' <<< $json)
+  echo "$output"
+}
+
 trim () {
   local output=$(echo "$1" | sed -e 's/^[[:space:]]*//; s/[[:space:]]*$//')
   echo "$output"
@@ -71,6 +79,7 @@ flows () {
     local flow_id=$(jq -r '.FlowId' <<< $flow)
     local flow_name=$(sfilename "$(jq -r '.FlowName' <<< $flow)")
     local folder_path="$BASE_PATH/$flow_name"
+    local explanation_path="$folder_path/$EXPLANATION_FILE"
 
     echo "$flow_name ($flow_id)"
     cmkdir "$folder_path"
@@ -90,13 +99,25 @@ flows () {
       flow_submission_files=$(echo -e "$flow_submission" | jq -r "[.[] | {FileName: .name, FileDownloadLink: .download}]")
       download_files "$folder_path" "$SUBMISSION_FOLDER" "$flow_submission_files"
     fi;
+
+    if [ -f "$explanation_path" ]; then
+      echo "$IS$FILE_EXISTS_TEXT ($explanation_path)"
+      continue
+    fi
+
+    local flow_explanation=$(get_flow_explanation "$flow_id")
+
+    if [ ! -z "$flow_explanation" ]; then
+      echo "$IS$EXPLANATION_FILE"
+      echo "$flow_explanation" > "$explanation_path"
+    fi;
   done
 }
 
 download_files () {
   local folder_path="$1/$2"
 
-  echo "$IS$IS$2"
+  echo "$IS$2"
   cmkdir "$folder_path"
 
   for key in $(jq 'keys | .[]' <<< $3); do
@@ -106,11 +127,11 @@ download_files () {
     local file_path="$folder_path/$file_name"
 
     if [ -f "$file_path" ]; then
-      echo "$IS$IS$IS$FILE_EXISTS_TEXT ($file_path)"
+      echo "$IS$IS$FILE_EXISTS_TEXT ($file_path)"
       continue
     fi
 
-    echo "$IS$IS$IS$file_name"
+    echo "$IS$IS$file_name"
     curl -s "$file_download_link" --cookie "$COOKIES_FILE" --output "$file_path"
   done
 }
